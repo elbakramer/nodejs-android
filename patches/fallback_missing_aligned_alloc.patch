@@ -1,0 +1,85 @@
+issue happens when building with android sdk version older than 28
+
+related issue:
+https://github.com/android/ndk/issues/1339
+
+as issue says, aligned_alloc() is added in P (Pie) which is sdk version 28
+so possible workarounds are:
+
+  1. upgrade android sdk version to 28 (77% coverage at the time of writing)
+  2. skip the cctest any way, since:
+    1. we are building shared lib for android and cannot test directly after the build
+    2. aligned_alloc() is used in the only one code, test_crypto_clienthello.cc
+  3. get the boost library and apply this patch (but note that this was tried without knowing any implications on runtime)
+
+diff --git a/node.gyp b/node.gyp
+index e8e1d9f933..02ae505b9a 100644
+--- a/node.gyp
++++ b/node.gyp
+@@ -373,12 +373,12 @@
+             'opensslconfig': './deps/openssl/nodejs-openssl.cnf',
+             'conditions': [
+               ['GENERATOR == "ninja"', {
+-	        'fipsmodule_internal': '<(PRODUCT_DIR)/lib/<(provider_name).so',
++                'fipsmodule_internal': '<(PRODUCT_DIR)/lib/<(provider_name).so',
+                 'fipsmodule': '<(PRODUCT_DIR)/obj/lib/openssl-modules/fips.so',
+                 'fipsconfig': '<(PRODUCT_DIR)/obj/lib/fipsmodule.cnf',
+                 'opensslconfig_internal': '<(PRODUCT_DIR)/obj/lib/openssl.cnf',
+-             }, {
+-	        'fipsmodule_internal': '<(PRODUCT_DIR)/obj.target/deps/openssl/<(provider_name).so',
++              }, {
++                'fipsmodule_internal': '<(PRODUCT_DIR)/obj.target/deps/openssl/<(provider_name).so',
+                 'fipsmodule': '<(PRODUCT_DIR)/obj.target/deps/openssl/lib/openssl-modules/fips.so',
+                 'fipsconfig': '<(PRODUCT_DIR)/obj.target/deps/openssl/fipsmodule.cnf',
+                 'opensslconfig_internal': '<(PRODUCT_DIR)/obj.target/deps/openssl/openssl.cnf',
+@@ -1252,7 +1252,21 @@
+           'sources': [
+             'test/cctest/test_crypto_clienthello.cc',
+             'test/cctest/test_node_crypto.cc',
+-          ]
++          ],
++          'conditions': [
++            [ 'target_os=="android"', {
++              'conditions': [
++                [ 'host_os=="linux"', {
++                  'variables': {
++                    'BOOST_ROOT%': '<!(echo $BOOST_ROOT)',
++                  },
++                }],
++              ],
++              'include_dirs': [
++                '<(BOOST_ROOT)',
++              ],
++            }],
++          ],
+         }],
+         ['v8_enable_inspector==1', {
+           'sources': [
+@@ -1325,7 +1339,7 @@
+         ['OS=="solaris"', {
+           'ldflags': [ '-I<(SHARED_INTERMEDIATE_DIR)' ]
+         }],
+-        # Skip cctest while building shared lib node for Windows
++        # Skip embedtest while building shared lib node for Windows
+         [ 'OS=="win" and node_shared=="true"', {
+           'type': 'none',
+         }],
+diff --git a/test/cctest/test_crypto_clienthello.cc b/test/cctest/test_crypto_clienthello.cc
+index 60a8e294c8..564a504e10 100644
+--- a/test/cctest/test_crypto_clienthello.cc
++++ b/test/cctest/test_crypto_clienthello.cc
+@@ -29,6 +29,14 @@
+ #endif
+ #endif
+ 
++// If the test is being compiled with Android NDK toolchain, there is no
++// aligned_alloc() even if the '-std=gnu++17' flag is set, thus here try to
++// fallback to boost's implementation.
++#if defined(__ANDROID__) && !defined(_ISOC11_SOURCE)
++#include <boost/align/aligned_alloc.hpp>
++using boost::alignment::aligned_alloc;
++#endif
++
+ #if defined(USE_MPROTECT)
+ size_t GetPageSize() {
+   int page_size = sysconf(_SC_PAGE_SIZE);

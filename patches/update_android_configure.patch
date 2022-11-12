@@ -1,0 +1,108 @@
+extended existing implementation in order to support forwarding unknown args
+
+diff --git a/android_configure.py b/android_configure.py
+index 57d9402391..8dfc961e2c 100644
+--- a/android_configure.py
++++ b/android_configure.py
+@@ -1,6 +1,34 @@
++from __future__ import print_function
++
++import argparse
++import os
+ import platform
++import subprocess
+ import sys
+-import os
++
++parser = argparse.ArgumentParser()
++
++parser.add_argument("--android-patch-only", action="store_true", dest="android_patch_only", default=False)
++parser.add_argument("--android-ndk-path", action="store", dest="android_ndk_path", default=os.environ.get("ANDROID_NDK_PATH"))
++parser.add_argument("--android-sdk-version", action="store", dest="android_sdk_version", type=int, default=24)
++parser.add_argument("--android-target-arch", action="store", dest="android_target_arch", default="arm64")
++
++(options, args) = parser.parse_known_args()
++
++android_ndk_path = options.android_ndk_path
++android_sdk_version = str(options.android_sdk_version)
++android_target_arch = options.android_target_arch
++
++if "patch" in args:
++    options.android_patch_only = True
++    args.remove("patch")
++
++if len(args) == 3 and all(not arg.startsiwth("-") for arg in args):
++    android_ndk_path = args[0]
++    android_sdk_version = args[1]
++    arch = args[2]
++
++arch = android_target_arch
+ 
+ # TODO: In next version, it will be a JSON file listing all the patches, and then it will iterate through to apply them.
+ def patch_android():
+@@ -14,26 +42,22 @@ if platform.system() == "Windows":
+     print("android-configure is not supported on Windows yet.")
+     sys.exit(1)
+ 
+-if len(sys.argv) == 2 and sys.argv[1] == "patch":
++if options.android_patch_only:
+     patch_android()
+     sys.exit(0)
+ 
+-if len(sys.argv) != 4:
+-    print("Usage: ./android-configure [patch] <path to the Android NDK> <Android SDK version> <target architecture>")
++if not android_ndk_path or not android_sdk_version or not android_target_arch:
++    print("Usage: ./android-configure [--android-patch-only|patch] [--android-ndk-path=]<path to the Android NDK> [--android-sdk-version=]<Android SDK version> [--android-target-arch=]<target architecture>")
+     sys.exit(1)
+ 
+-if not os.path.exists(sys.argv[1]) or not os.listdir(sys.argv[1]):
++if not os.path.exists(android_ndk_path) or not os.listdir(android_ndk_path):
+     print("\033[91mError: \033[0m" + "Invalid path to the Android NDK")
+     sys.exit(1)
+ 
+-if int(sys.argv[2]) < 24:
++if int(android_sdk_version) < 24:
+     print("\033[91mError: \033[0m" + "Android SDK version must be at least 24 (Android 7.0)")
+     sys.exit(1)
+ 
+-android_ndk_path = sys.argv[1]
+-android_sdk_version = sys.argv[2]
+-arch = sys.argv[3]
+-
+ if arch == "arm":
+     DEST_CPU = "arm"
+     TOOLCHAIN_PREFIX = "armv7a-linux-androideabi"
+@@ -72,5 +96,32 @@ GYP_DEFINES += " android_target_arch=" + arch
+ GYP_DEFINES += " host_os=" + host_os + " OS=android"
+ os.environ['GYP_DEFINES'] = GYP_DEFINES
+ 
++
++try:
++    from subprocess import check_call
++except ImportError:
++    def check_call(*args, timeout=None, **kwargs):
++        with subprocess.Popen(*args, **kwargs) as p:
++            try:
++                retcode = p.wait(timeout=timeout)
++            except:
++                p.kill()
++                raise
++            else:
++                if retcode:
++                    cmd = kwargs.get("args")
++                    if cmd is None:
++                        cmd = args[0]
++                    raise subprocess.CalledProcessError(retcode, cmd)
++                return 0
++
++
+ if os.path.exists("./configure"):
+-    os.system("./configure --dest-cpu=" + DEST_CPU + " --dest-os=android --openssl-no-asm --cross-compiling")
++    check_call([
++      "./configure",
++      "--dest-cpu=" + DEST_CPU,
++      "--dest-os=android",
++      "--openssl-no-asm",
++      "--cross-compiling",
++    ] + args)
++

@@ -1,0 +1,12 @@
+#!/bin/bash
+
+SRCS="./srcs/"
+PATCHES="./patches/"
+
+NODE_VERSION="${NODE_VERSION:-18.12.1}"
+
+NODE_SRC_DIR="$SRCS/node-v$NODE_VERSION"
+NODE_SRC_DIR_PATCHED="$NODE_SRC_DIR-patched"
+
+cp -r "$NODE_SRC_DIR" "$NODE_SRC_DIR_PATCHED"
+
